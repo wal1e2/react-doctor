@@ -15,6 +15,7 @@ interface CliFlags {
   deadCode: boolean;
   verbose: boolean;
   score: boolean;
+  fix: boolean;
   yes: boolean;
   project?: string;
 }
@@ -33,6 +34,7 @@ const program = new Command()
   .option("--score", "output only the score")
   .option("-y, --yes", "skip prompts, scan all workspace projects")
   .option("--project <name>", "select workspace project (comma-separated for multiple)")
+  .option("--fix", "open Ami to auto-fix all issues")
   .action(async (directory: string, flags: CliFlags) => {
     try {
       const resolvedDirectory = path.resolve(directory);
@@ -72,6 +74,10 @@ const program = new Command()
           logger.break();
         }
       }
+
+      if (flags.fix) {
+        openAmiToFix(resolvedDirectory);
+      }
     } catch (error) {
       handleError(error);
     }
@@ -88,36 +94,47 @@ const AMI_INSTALL_URL = "https://ami.dev/install.sh";
 const AMI_FIX_PROMPT =
   "Run npx -y react-doctor@latest . --verbose, read every diagnostic, then fix all issues one by one. After fixing, re-run react-doctor to verify the score improved.";
 
-const encodeDeeplinkParameter = (value: string): string =>
-  encodeURIComponent(value).replace(/%20/g, "%20");
-
 const buildAmiDeeplink = (projectDirectory: string): string => {
-  const encodedDirectory = encodeDeeplinkParameter(projectDirectory);
-  const encodedPrompt = encodeDeeplinkParameter(AMI_FIX_PROMPT);
+  const encodedDirectory = encodeURIComponent(projectDirectory);
+  const encodedPrompt = encodeURIComponent(AMI_FIX_PROMPT);
   return `ami://new-chat?cwd=${encodedDirectory}&prompt=${encodedPrompt}&mode=agent`;
 };
 
-const installAndOpenAmi = async (directory: string): Promise<void> => {
-  const resolvedDirectory = path.resolve(directory);
+const isAmiInstalled = (): boolean => {
+  try {
+    execSync("ls /Applications/Ami.app", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
-  logger.log("Installing Ami...");
+const installAmi = (): void => {
+  logger.log("Ami not found. Installing...");
   logger.break();
-
   try {
     execSync(`curl -fsSL ${AMI_INSTALL_URL} | bash`, { stdio: "inherit" });
   } catch {
     logger.error("Failed to install Ami. Visit https://ami.dev to install manually.");
     process.exit(1);
   }
-
   logger.break();
+};
+
+const openAmiToFix = (directory: string): void => {
+  const resolvedDirectory = path.resolve(directory);
+
+  if (!isAmiInstalled()) {
+    installAmi();
+  }
+
   logger.log("Opening Ami to fix react-doctor issues...");
 
   const deeplink = buildAmiDeeplink(resolvedDirectory);
 
   try {
     execSync(`open "${deeplink}"`, { stdio: "ignore" });
-    logger.success(`Opened Ami with react-doctor fix prompt.`);
+    logger.success("Opened Ami with react-doctor fix prompt.");
   } catch {
     logger.break();
     logger.dim("Could not open Ami automatically. Open this URL manually:");
@@ -125,27 +142,23 @@ const installAndOpenAmi = async (directory: string): Promise<void> => {
   }
 };
 
+const fixAction = (directory: string) => {
+  try {
+    openAmiToFix(directory);
+  } catch (error) {
+    handleError(error);
+  }
+};
+
 const fixCommand = new Command("fix")
-  .description("Install Ami and auto-fix react-doctor issues")
+  .description("Open Ami to auto-fix react-doctor issues")
   .argument("[directory]", "project directory", ".")
-  .action(async (directory: string) => {
-    try {
-      await installAndOpenAmi(directory);
-    } catch (error) {
-      handleError(error);
-    }
-  });
+  .action(fixAction);
 
 const installAmiCommand = new Command("install-ami")
-  .description("Install Ami and auto-fix react-doctor issues")
+  .description("Open Ami to auto-fix react-doctor issues")
   .argument("[directory]", "project directory", ".")
-  .action(async (directory: string) => {
-    try {
-      await installAndOpenAmi(directory);
-    } catch (error) {
-      handleError(error);
-    }
-  });
+  .action(fixAction);
 
 program.addCommand(fixCommand);
 program.addCommand(installAmiCommand);
