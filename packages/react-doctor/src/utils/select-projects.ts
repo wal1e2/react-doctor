@@ -62,18 +62,8 @@ const resolveProjectFlag = (
 
 const printDiscoveredProjects = (packages: WorkspacePackage[]): void => {
   logger.log(
-    `${highlighter.success("✔")} Found ${highlighter.info(`${packages.length}`)} React projects:`,
+    `${highlighter.success("✔")} Select projects to scan ${highlighter.dim("›")} ${packages.map((workspacePackage) => workspacePackage.name).join(", ")}`,
   );
-  logger.break();
-
-  for (const workspacePackage of packages) {
-    logger.log(`  ${highlighter.dim("─")} ${workspacePackage.directory}`);
-  }
-
-  logger.break();
-  logger.dim(`Run with a specific path to scan a project:`);
-  logger.dim(`  npx -y react-doctor@latest <path>`);
-  logger.break();
 };
 
 const promptProjectSelection = async (
