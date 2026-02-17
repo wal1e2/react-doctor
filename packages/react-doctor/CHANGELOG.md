@@ -1,5 +1,11 @@
 # react-doctor
 
+## 0.0.16
+
+### Patch Changes
+
+- fix: log lint errors
+
 ## 0.0.15
 
 ### Patch Changes
