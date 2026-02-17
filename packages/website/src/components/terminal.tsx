@@ -371,7 +371,10 @@ const Terminal = () => {
       {state.showHeader && (
         <FadeIn>
           <Spacer />
-          <div>react-doctor</div>
+          <div className="flex items-center gap-2">
+            <img src="/favicon.svg" alt="React Doctor" width={24} height={24} />
+            react-doctor
+          </div>
           <div className="text-neutral-500">
             Let coding agents diagnose and fix your React code.
           </div>

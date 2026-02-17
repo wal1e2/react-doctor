@@ -1,4 +1,4 @@
-# React Doctor
+# <img src="https://github.com/millionco/react-doctor/blob/main/.github/public/logo.svg?raw=true" width="60" align="center" /> React Doctor
 
 [![version](https://img.shields.io/npm/v/react-doctor?style=flat&colorA=000000&colorB=000000)](https://npmjs.com/package/react-doctor)
 [![downloads](https://img.shields.io/npm/dt/react-doctor.svg?style=flat&colorA=000000&colorB=000000)](https://npmjs.com/package/react-doctor)
