@@ -23,32 +23,15 @@ Use `--verbose` to see affected files and line numbers:
 npx -y react-doctor@latest . --verbose
 ```
 
-## Example output
+## Install as a skill
 
+Add React Doctor's rules as a [skill](https://skills.sh) for your coding agent:
+
+```bash
+npx skills add aidenybai/react-doctor
 ```
-$ npx -y react-doctor@latest .
 
-react-doctor v0.0.5
-
-✓ Detecting framework. Found Next.js.
-✓ Detecting React version. Found React 18.2.0.
-✓ Detecting language. Found TypeScript.
-✓ Found 147 source files.
-
-✓ Running lint checks.
-✓ Detecting dead code.
-
-  ✗ Derived state computed in useEffect (5)
-  ✗ Array index used as key (12)
-  ✗ Data fetched in useEffect without cleanup (8)
-  ✗ Component "UserCard" inside "Dashboard" — destroys state every render (4)
-
-  42 / 100  Critical
-
-  ████████████░░░░░░░░░░░░░░░░░░
-
-  29 errors  across 18 files  in 2.1s
-```
+This gives agents like Cursor, Claude Code, Copilot, and others access to all 47+ React best practice rules. The CLI will also prompt to install the skill on first run.
 
 ## Options
 
@@ -65,26 +48,6 @@ Options:
   --project <name>  select workspace project (comma-separated for multiple)
   -h, --help        display help for command
 ```
-
-## Install as a skill
-
-Add React Doctor's rules as a [skill](https://skills.sh) for your coding agent:
-
-```bash
-npx skills add aidenybai/react-doctor
-```
-
-This gives agents like Cursor, Claude Code, Copilot, and others access to all 47+ React best practice rules. The CLI will also prompt to install the skill on first run.
-
-## Use with coding agents
-
-Run react-doctor with `--verbose`, then paste the output into your agent to get fixes:
-
-```bash
-npx -y react-doctor@latest . --verbose
-```
-
-The `--verbose` flag includes file paths and line numbers so your agent knows exactly where to look.
 
 ## Contributing
 
