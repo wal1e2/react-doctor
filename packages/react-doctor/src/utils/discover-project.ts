@@ -194,8 +194,7 @@ const findDependencyInfoFromMonorepoRoot = (directory: string): DependencyInfo =
 
   return {
     reactVersion: rootInfo.reactVersion ?? workspaceInfo.reactVersion,
-    framework:
-      rootInfo.framework !== "unknown" ? rootInfo.framework : workspaceInfo.framework,
+    framework: rootInfo.framework !== "unknown" ? rootInfo.framework : workspaceInfo.framework,
   };
 };
 

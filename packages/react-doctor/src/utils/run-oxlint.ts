@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { ERROR_PREVIEW_LENGTH_CHARS, JSX_FILE_PATTERN } from "../constants.js";
 import { createOxlintConfig } from "../oxlint-config.js";
 import type { CleanedDiagnostic, Diagnostic, Framework, OxlintOutput } from "../types.js";
+import { neutralizeDisableDirectives } from "./neutralize-disable-directives.js";
 
 const esmRequire = createRequire(import.meta.url);
 
@@ -260,6 +261,7 @@ export const runOxlint = async (
   const configPath = path.join(os.tmpdir(), `react-doctor-oxlintrc-${process.pid}.json`);
   const pluginPath = resolvePluginPath();
   const config = createOxlintConfig({ pluginPath, framework, hasReactCompiler });
+  const restoreDisableDirectives = neutralizeDisableDirectives(rootDirectory);
 
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -332,6 +334,7 @@ export const runOxlint = async (
         };
       });
   } finally {
+    restoreDisableDirectives();
     if (fs.existsSync(configPath)) {
       fs.unlinkSync(configPath);
     }
