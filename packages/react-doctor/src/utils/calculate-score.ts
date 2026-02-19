@@ -12,8 +12,6 @@ const WARNING_RULE_PENALTY = 0.75;
 const ERROR_ESTIMATED_FIX_RATE = 0.85;
 const WARNING_ESTIMATED_FIX_RATE = 0.8;
 
-const buildDiagnosticPayload = (diagnostics: Diagnostic[]): Diagnostic[] => diagnostics;
-
 const getScoreLabel = (score: number): string => {
   if (score >= SCORE_GOOD_THRESHOLD) return "Great";
   if (score >= SCORE_OK_THRESHOLD) return "Needs work";
@@ -71,7 +69,7 @@ export const calculateScore = async (diagnostics: Diagnostic[]): Promise<ScoreRe
     const response = await fetch(SCORE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ diagnostics: buildDiagnosticPayload(diagnostics) }),
+      body: JSON.stringify({ diagnostics }),
     });
 
     if (!response.ok) return null;
@@ -89,7 +87,7 @@ export const fetchEstimatedScore = async (
     const response = await fetch(ESTIMATE_SCORE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ diagnostics: buildDiagnosticPayload(diagnostics) }),
+      body: JSON.stringify({ diagnostics }),
     });
 
     if (!response.ok) return estimateScoreLocally(diagnostics);
