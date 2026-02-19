@@ -3,25 +3,18 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command } from "commander";
-import {
-  OPEN_BASE_URL,
-  SCORE_GOOD_THRESHOLD,
-  SCORE_OK_THRESHOLD,
-  SEPARATOR_LENGTH_CHARS,
-} from "./constants.js";
+import { OPEN_BASE_URL, SCORE_GOOD_THRESHOLD, SCORE_OK_THRESHOLD } from "./constants.js";
 import { scan } from "./scan.js";
 import type { Diagnostic, DiffInfo, EstimatedScoreResult, ScanOptions } from "./types.js";
 import { fetchEstimatedScore } from "./utils/calculate-score.js";
-import { copyToClipboard } from "./utils/copy-to-clipboard.js";
 import { createFramedLine, renderFramedBoxString } from "./utils/framed-box.js";
 import { filterSourceFiles, getDiffInfo } from "./utils/get-diff-files.js";
 import { handleError } from "./utils/handle-error.js";
 import { highlighter } from "./utils/highlighter.js";
 import { loadConfig } from "./utils/load-config.js";
-import { logger, startLoggerCapture, stopLoggerCapture } from "./utils/logger.js";
+import { logger } from "./utils/logger.js";
 import { clearSelectBanner, prompts, setSelectBanner } from "./utils/prompts.js";
 import { selectProjects } from "./utils/select-projects.js";
-import { maybePromptSkillInstall } from "./utils/skill-prompt.js";
 
 const VERSION = process.env.VERSION ?? "0.0.0";
 
@@ -31,7 +24,6 @@ interface CliFlags {
   verbose: boolean;
   score: boolean;
   fix: boolean;
-  prompt: boolean;
   yes: boolean;
   offline: boolean;
   ami: boolean;
@@ -59,7 +51,7 @@ const resolveDiffMode = async (
   if (effectiveDiff !== undefined && effectiveDiff !== false) {
     if (diffInfo) return true;
     if (!isScoreOnly) {
-      logger.warn("Not on a feature branch or could not determine base branch. Running full scan.");
+      logger.warn("No feature branch or uncommitted changes detected. Running full scan.");
       logger.break();
     }
     return false;
@@ -72,13 +64,17 @@ const resolveDiffMode = async (
   if (shouldSkipPrompts) return true;
   if (isScoreOnly) return false;
 
-  const { shouldScanBranchOnly } = await prompts({
+  const promptMessage = diffInfo.isCurrentChanges
+    ? `Found ${changedSourceFiles.length} uncommitted changed files. Only scan current changes?`
+    : `On branch ${diffInfo.currentBranch} (${changedSourceFiles.length} changed files vs ${diffInfo.baseBranch}). Only scan this branch?`;
+
+  const { shouldScanChangedOnly } = await prompts({
     type: "confirm",
-    name: "shouldScanBranchOnly",
-    message: `On branch ${diffInfo.currentBranch} (${changedSourceFiles.length} changed files vs ${diffInfo.baseBranch}). Only scan this branch?`,
+    name: "shouldScanChangedOnly",
+    message: promptMessage,
     initial: true,
   });
-  return Boolean(shouldScanBranchOnly);
+  return Boolean(shouldScanChangedOnly);
 };
 
 const program = new Command()
@@ -96,12 +92,8 @@ const program = new Command()
   .option("--offline", "skip telemetry (anonymous, not stored, only used to calculate score)")
   .option("--no-ami", "skip Ami-related prompts")
   .option("--fix", "open Ami to auto-fix all issues")
-  .option("--prompt", "copy latest scan output to clipboard")
   .action(async (directory: string, flags: CliFlags) => {
-    const isScoreOnly = flags.score && !flags.prompt;
-    const shouldCopyPromptOutput = flags.prompt;
-
-    startLoggerCapture();
+    const isScoreOnly = flags.score;
 
     try {
       const resolvedDirectory = path.resolve(directory);
@@ -120,9 +112,7 @@ const program = new Command()
         deadCode: isCliOverride("deadCode")
           ? flags.deadCode
           : (userConfig?.deadCode ?? flags.deadCode),
-        verbose:
-          flags.prompt ||
-          (isCliOverride("verbose") ? Boolean(flags.verbose) : (userConfig?.verbose ?? false)),
+        verbose: isCliOverride("verbose") ? Boolean(flags.verbose) : (userConfig?.verbose ?? false),
         scoreOnly: isScoreOnly,
         offline: flags.offline,
       };
@@ -155,9 +145,13 @@ const program = new Command()
       );
 
       if (isDiffMode && diffInfo && !isScoreOnly) {
-        logger.log(
-          `Scanning changes: ${highlighter.info(diffInfo.currentBranch)} → ${highlighter.info(diffInfo.baseBranch)}`,
-        );
+        if (diffInfo.isCurrentChanges) {
+          logger.log("Scanning uncommitted changes");
+        } else {
+          logger.log(
+            `Scanning changes: ${highlighter.info(diffInfo.currentBranch)} → ${highlighter.info(diffInfo.baseBranch)}`,
+          );
+        }
         logger.break();
       }
 
@@ -191,35 +185,18 @@ const program = new Command()
         }
       }
 
-      const capturedScanOutput = stopLoggerCapture();
-
       if (flags.fix) {
         openAmiToFix(resolvedDirectory);
       }
 
-      if (shouldCopyPromptOutput) {
-        copyPromptToClipboard(capturedScanOutput, !isScoreOnly);
-      } else if (!isScoreOnly) {
-        await maybePromptSkillInstall(shouldSkipAmiPrompts);
-        if (!shouldSkipAmiPrompts && !flags.fix) {
-          const estimatedScoreResult = flags.offline
-            ? null
-            : await fetchEstimatedScore(allDiagnostics);
-          await maybePromptFix(
-            resolvedDirectory,
-            allDiagnostics,
-            estimatedScoreResult,
-            capturedScanOutput,
-          );
-        }
+      if (!isScoreOnly && !shouldSkipAmiPrompts && !flags.fix) {
+        const estimatedScoreResult = flags.offline
+          ? null
+          : await fetchEstimatedScore(allDiagnostics);
+        await maybePromptFix(resolvedDirectory, allDiagnostics, estimatedScoreResult);
       }
     } catch (error) {
-      handleError(error, { shouldExit: !shouldCopyPromptOutput });
-    } finally {
-      const remainingOutput = stopLoggerCapture();
-      if (shouldCopyPromptOutput && remainingOutput) {
-        copyPromptToClipboard(remainingOutput, !isScoreOnly);
-      }
+      handleError(error);
     }
   })
   .addHelpText(
@@ -242,10 +219,6 @@ const colorizeByScore = (text: string, score: number): string => {
 
 const DEEPLINK_FIX_PROMPT =
   "Run `npx -y react-doctor@latest .` to diagnose issues, then fix all reported issues one by one. After applying fixes, run it again to verify the results improved.";
-const CLIPBOARD_FIX_PROMPT =
-  "Fix all issues reported in the react-doctor diagnostics below, one by one. After applying fixes, run `npx -y react-doctor@latest .` again to verify the results improved.";
-const REACT_DOCTOR_OUTPUT_LABEL = "react-doctor output";
-const SCAN_SUMMARY_SEPARATOR = "─".repeat(SEPARATOR_LENGTH_CHARS);
 
 const isAmiInstalled = (): boolean => {
   if (process.platform === "darwin") {
@@ -341,37 +314,7 @@ const openAmiToFix = (directory: string): void => {
   }
 };
 
-const buildPromptWithOutput = (reactDoctorOutput: string): string => {
-  const summaryStartIndex = reactDoctorOutput.indexOf(SCAN_SUMMARY_SEPARATOR);
-  const diagnosticsOutput =
-    summaryStartIndex === -1
-      ? reactDoctorOutput
-      : reactDoctorOutput.slice(0, summaryStartIndex).trimEnd();
-  const normalizedReactDoctorOutput = diagnosticsOutput.trim();
-  const outputContent =
-    normalizedReactDoctorOutput.length > 0 ? normalizedReactDoctorOutput : "No output captured.";
-  return `${CLIPBOARD_FIX_PROMPT}\n\n${REACT_DOCTOR_OUTPUT_LABEL}:\n\`\`\`\n${outputContent}\n\`\`\``;
-};
-
-const copyPromptToClipboard = (reactDoctorOutput: string, shouldLogResult: boolean): void => {
-  const promptWithOutput = buildPromptWithOutput(reactDoctorOutput);
-  const didCopyPromptToClipboard = copyToClipboard(promptWithOutput);
-
-  if (!shouldLogResult) {
-    return;
-  }
-
-  if (didCopyPromptToClipboard) {
-    logger.success("Copied latest scan output to clipboard");
-    return;
-  }
-
-  logger.warn("Could not copy prompt to clipboard automatically. Use this prompt:");
-  logger.info(promptWithOutput);
-};
-
 const FIX_METHOD_AMI = "ami";
-const FIX_METHOD_CLIPBOARD = "clipboard";
 const FIX_COMMAND_HINT = "npx react-doctor@latest --fix";
 
 const buildAmiBanner = (
@@ -407,18 +350,6 @@ const buildAmiBanner = (
   ]);
 };
 
-const buildClipboardWarningBanner = (): string =>
-  renderFramedBoxString([
-    createFramedLine(
-      "⚠ Other agents may not fix these issues well.",
-      `${highlighter.warn("⚠")} Other agents may not fix these issues well.`,
-    ),
-    createFramedLine(""),
-    createFramedLine("react-doctor diagnostics require React-specific context"),
-    createFramedLine("that general-purpose agents often miss, leading to"),
-    createFramedLine("incomplete or incorrect fixes."),
-  ]);
-
 const buildSkipBanner = (issueCount: number, estimatedScore: number): string => {
   const issueLabel = issueCount === 1 ? "issue" : "issues";
   const estimatedScoreDisplay = colorizeByScore(`~${estimatedScore}`, estimatedScore);
@@ -442,15 +373,13 @@ const configureFixBanners = (
 ): void => {
   const { currentScore, estimatedScore } = estimatedScoreResult;
   setSelectBanner(buildAmiBanner(issueCount, currentScore, estimatedScore), 0);
-  setSelectBanner(buildClipboardWarningBanner(), 1);
-  setSelectBanner(buildSkipBanner(issueCount, estimatedScore), 2);
+  setSelectBanner(buildSkipBanner(issueCount, estimatedScore), 1);
 };
 
 const maybePromptFix = async (
   directory: string,
   diagnostics: Diagnostic[],
   estimatedScoreResult: EstimatedScoreResult | null,
-  capturedScanOutput: string,
 ): Promise<void> => {
   if (diagnostics.length === 0) return;
 
@@ -470,11 +399,6 @@ const maybePromptFix = async (
         description: "Optimized coding agent for React Doctor",
         value: FIX_METHOD_AMI,
       },
-      {
-        title: "Copy to clipboard",
-        description: "Other agents may lack context for react-doctor fixes",
-        value: FIX_METHOD_CLIPBOARD,
-      },
       { title: "Skip", value: "skip" },
     ],
   });
@@ -483,8 +407,6 @@ const maybePromptFix = async (
 
   if (fixMethod === FIX_METHOD_AMI) {
     openAmiToFix(directory);
-  } else if (fixMethod === FIX_METHOD_CLIPBOARD) {
-    copyPromptToClipboard(capturedScanOutput, true);
   } else {
     logger.break();
     logger.dim(`  Run ${highlighter.info(FIX_COMMAND_HINT)} anytime to fix issues.`);

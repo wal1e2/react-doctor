@@ -108,16 +108,7 @@ export interface DiffInfo {
   currentBranch: string;
   baseBranch: string;
   changedFiles: string[];
-}
-
-export interface ClipboardCommand {
-  command: string;
-  args: string[];
-}
-
-export interface LoggerCaptureState {
-  isEnabled: boolean;
-  lines: string[];
+  isCurrentChanges?: boolean;
 }
 
 export interface HandleErrorOptions {

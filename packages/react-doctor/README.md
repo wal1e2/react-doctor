@@ -38,15 +38,15 @@ Use `--verbose` to see affected files and line numbers:
 npx -y react-doctor@latest . --verbose
 ```
 
-## Install as a skill
+## Install for your coding agent
 
-Add React Doctor's rules as a [skill](https://skills.sh) for your coding agent:
+Teach your coding agent all 47+ React best practice rules:
 
 ```bash
-npx skills add millionco/react-doctor
+curl -fsSL https://raw.githubusercontent.com/millionco/react-doctor/main/install.sh | bash
 ```
 
-This gives agents like Cursor, Claude Code, Copilot, and others access to all 47+ React best practice rules. The CLI will also prompt to install the skill on first run.
+Supports Cursor, Claude Code, Amp Code, Codex, Gemini CLI, OpenCode, Windsurf, and Antigravity.
 
 ## Options
 
@@ -64,7 +64,6 @@ Options:
   --diff [base]     scan only files changed vs base branch
   --no-ami          skip Ami-related prompts
   --fix             open Ami to auto-fix all issues
-  --prompt          copy latest scan output to clipboard
   -h, --help        display help for command
 ```
 
