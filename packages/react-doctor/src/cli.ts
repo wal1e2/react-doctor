@@ -32,8 +32,16 @@ interface CliFlags {
   diff?: boolean | string;
 }
 
-process.on("SIGINT", () => process.exit(0));
-process.on("SIGTERM", () => process.exit(0));
+const exitWithFixHint = () => {
+  logger.break();
+  logger.log("Cancelled.");
+  logger.dim("Run `npx react-doctor@latest --fix` to fix issues.");
+  logger.break();
+  process.exit(0);
+};
+
+process.on("SIGINT", exitWithFixHint);
+process.on("SIGTERM", exitWithFixHint);
 
 const resolveDiffMode = async (
   diffInfo: DiffInfo | null,

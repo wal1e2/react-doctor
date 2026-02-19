@@ -13,6 +13,7 @@ let didPatchMultiselectSubmit = false;
 const onCancel = () => {
   logger.break();
   logger.log("Cancelled.");
+  logger.dim("Run `npx react-doctor@latest --fix` to fix issues.");
   logger.break();
   process.exit(0);
 };
