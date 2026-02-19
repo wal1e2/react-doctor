@@ -83,6 +83,18 @@ export interface ScoreResult {
   label: string;
 }
 
+export interface ScanResult {
+  diagnostics: Diagnostic[];
+  scoreResult: ScoreResult | null;
+}
+
+export interface EstimatedScoreResult {
+  currentScore: number;
+  currentLabel: string;
+  estimatedScore: number;
+  estimatedLabel: string;
+}
+
 export interface ScanOptions {
   lint?: boolean;
   deadCode?: boolean;

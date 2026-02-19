@@ -12,15 +12,14 @@ import {
   SCORE_BAR_WIDTH_CHARS,
   SCORE_GOOD_THRESHOLD,
   SCORE_OK_THRESHOLD,
-  SUMMARY_BOX_HORIZONTAL_PADDING_CHARS,
-  SUMMARY_BOX_OUTER_INDENT_CHARS,
   SHARE_BASE_URL,
 } from "./constants.js";
-import type { Diagnostic, ScanOptions, ScoreResult } from "./types.js";
+import type { Diagnostic, ScanOptions, ScanResult, ScoreResult } from "./types.js";
 import { calculateScore } from "./utils/calculate-score.js";
 import { checkReducedMotion } from "./utils/check-reduced-motion.js";
 import { discoverProject, formatFrameworkName } from "./utils/discover-project.js";
 import { filterIgnoredDiagnostics } from "./utils/filter-diagnostics.js";
+import { type FramedLine, createFramedLine, printFramedBox } from "./utils/framed-box.js";
 import { groupBy } from "./utils/group-by.js";
 import { highlighter } from "./utils/highlighter.js";
 import { indentMultilineText } from "./utils/indent-multiline-text.js";
@@ -29,11 +28,6 @@ import { logger } from "./utils/logger.js";
 import { runKnip } from "./utils/run-knip.js";
 import { runOxlint } from "./utils/run-oxlint.js";
 import { spinner } from "./utils/spinner.js";
-
-interface FramedLine {
-  plainText: string;
-  renderedText: string;
-}
 
 interface ScoreBarSegments {
   filledSegment: string;
@@ -162,11 +156,6 @@ const colorizeByScore = (text: string, score: number): string => {
   return highlighter.error(text);
 };
 
-const createFramedLine = (plainText: string, renderedText: string = plainText): FramedLine => ({
-  plainText,
-  renderedText,
-});
-
 const buildScoreBarSegments = (score: number): ScoreBarSegments => {
   const filledCount = Math.round((score / PERFECT_SCORE) * SCORE_BAR_WIDTH_CHARS);
   const emptyCount = SCORE_BAR_WIDTH_CHARS - filledCount;
@@ -185,31 +174,6 @@ const buildPlainScoreBar = (score: number): string => {
 const buildScoreBar = (score: number): string => {
   const { filledSegment, emptySegment } = buildScoreBarSegments(score);
   return colorizeByScore(filledSegment, score) + highlighter.dim(emptySegment);
-};
-
-const printFramedBox = (framedLines: FramedLine[]): void => {
-  if (framedLines.length === 0) {
-    return;
-  }
-
-  const borderColorizer = highlighter.dim;
-  const outerIndent = " ".repeat(SUMMARY_BOX_OUTER_INDENT_CHARS);
-  const horizontalPadding = " ".repeat(SUMMARY_BOX_HORIZONTAL_PADDING_CHARS);
-  const maximumLineLength = Math.max(
-    ...framedLines.map((framedLine) => framedLine.plainText.length),
-  );
-  const borderLine = "─".repeat(maximumLineLength + SUMMARY_BOX_HORIZONTAL_PADDING_CHARS * 2);
-
-  logger.log(`${outerIndent}${borderColorizer(`┌${borderLine}┐`)}`);
-
-  for (const framedLine of framedLines) {
-    const trailingSpaces = " ".repeat(maximumLineLength - framedLine.plainText.length);
-    logger.log(
-      `${outerIndent}${borderColorizer("│")}${horizontalPadding}${framedLine.renderedText}${trailingSpaces}${horizontalPadding}${borderColorizer("│")}`,
-    );
-  }
-
-  logger.log(`${outerIndent}${borderColorizer(`└${borderLine}┘`)}`);
 };
 
 const printScoreGauge = (score: number, label: string): void => {
@@ -350,7 +314,7 @@ const printSummary = (
   logger.dim(`  Share your results: ${highlighter.info(shareUrl)}`);
 };
 
-export const scan = async (directory: string, inputOptions: ScanOptions = {}): Promise<void> => {
+export const scan = async (directory: string, inputOptions: ScanOptions = {}): Promise<ScanResult> => {
   const startTime = performance.now();
   const projectInfo = discoverProject(directory);
   const userConfig = loadConfig(directory);
@@ -472,7 +436,7 @@ export const scan = async (directory: string, inputOptions: ScanOptions = {}): P
     } else {
       logger.dim(noScoreMessage);
     }
-    return;
+    return { diagnostics, scoreResult };
   }
 
   if (diagnostics.length === 0) {
@@ -484,7 +448,7 @@ export const scan = async (directory: string, inputOptions: ScanOptions = {}): P
     } else {
       logger.dim(`  ${noScoreMessage}`);
     }
-    return;
+    return { diagnostics, scoreResult };
   }
 
   printDiagnostics(diagnostics, options.verbose);
@@ -499,4 +463,6 @@ export const scan = async (directory: string, inputOptions: ScanOptions = {}): P
     displayedSourceFileCount,
     noScoreMessage,
   );
+
+  return { diagnostics, scoreResult };
 };

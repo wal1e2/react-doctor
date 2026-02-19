@@ -3,17 +3,24 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command } from "commander";
-import { OPEN_BASE_URL, SEPARATOR_LENGTH_CHARS } from "./constants.js";
+import {
+  OPEN_BASE_URL,
+  SCORE_GOOD_THRESHOLD,
+  SCORE_OK_THRESHOLD,
+  SEPARATOR_LENGTH_CHARS,
+} from "./constants.js";
 import { scan } from "./scan.js";
-import type { DiffInfo, ScanOptions } from "./types.js";
+import type { Diagnostic, DiffInfo, EstimatedScoreResult, ScanOptions } from "./types.js";
+import { fetchEstimatedScore } from "./utils/calculate-score.js";
 import { copyToClipboard } from "./utils/copy-to-clipboard.js";
+import { createFramedLine, renderFramedBoxString } from "./utils/framed-box.js";
 import { filterSourceFiles, getDiffInfo } from "./utils/get-diff-files.js";
 import { maybeInstallGlobally } from "./utils/global-install.js";
 import { handleError } from "./utils/handle-error.js";
 import { highlighter } from "./utils/highlighter.js";
 import { loadConfig } from "./utils/load-config.js";
 import { logger, startLoggerCapture, stopLoggerCapture } from "./utils/logger.js";
-import { prompts } from "./utils/prompts.js";
+import { clearSelectBanner, prompts, setSelectBanner } from "./utils/prompts.js";
 import { selectProjects } from "./utils/select-projects.js";
 import { maybePromptSkillInstall } from "./utils/skill-prompt.js";
 
@@ -93,9 +100,7 @@ const program = new Command()
     const isScoreOnly = flags.score && !flags.prompt;
     const shouldCopyPromptOutput = flags.prompt;
 
-    if (shouldCopyPromptOutput) {
-      startLoggerCapture();
-    }
+    startLoggerCapture();
 
     try {
       const resolvedDirectory = path.resolve(directory);
@@ -154,6 +159,8 @@ const program = new Command()
         logger.break();
       }
 
+      const allDiagnostics: Diagnostic[] = [];
+
       for (const projectDirectory of projectDirectories) {
         let includePaths: string[] | undefined;
         if (isDiffMode) {
@@ -175,28 +182,41 @@ const program = new Command()
           logger.dim(`Scanning ${projectDirectory}...`);
           logger.break();
         }
-        await scan(projectDirectory, { ...scanOptions, includePaths });
+        const scanResult = await scan(projectDirectory, { ...scanOptions, includePaths });
+        allDiagnostics.push(...scanResult.diagnostics);
         if (!isScoreOnly) {
           logger.break();
         }
       }
 
+      const capturedScanOutput = stopLoggerCapture();
+
       if (flags.fix) {
         openAmiToFix(resolvedDirectory);
       }
 
-      if (!isScoreOnly && !flags.prompt) {
+      if (shouldCopyPromptOutput) {
+        copyPromptToClipboard(capturedScanOutput, !isScoreOnly);
+      } else if (!isScoreOnly) {
         await maybePromptSkillInstall(shouldSkipPrompts);
         if (!shouldSkipPrompts && !flags.fix) {
-          await maybePromptAmiFix(resolvedDirectory);
+          const estimatedScoreResult = flags.offline
+            ? null
+            : await fetchEstimatedScore(allDiagnostics);
+          await maybePromptFix(
+            resolvedDirectory,
+            allDiagnostics,
+            estimatedScoreResult,
+            capturedScanOutput,
+          );
         }
       }
     } catch (error) {
       handleError(error, { shouldExit: !shouldCopyPromptOutput });
     } finally {
-      if (shouldCopyPromptOutput) {
-        const capturedOutput = stopLoggerCapture();
-        copyPromptToClipboard(capturedOutput, !isScoreOnly);
+      const remainingOutput = stopLoggerCapture();
+      if (shouldCopyPromptOutput && remainingOutput) {
+        copyPromptToClipboard(remainingOutput, !isScoreOnly);
       }
     }
   })
@@ -208,8 +228,16 @@ ${highlighter.dim("Learn more:")}
 `,
   );
 
-const AMI_INSTALL_URL = "https://ami.dev/install.sh";
+const AMI_WEBSITE_URL = "https://ami.dev";
+const AMI_INSTALL_URL = `${AMI_WEBSITE_URL}/install.sh`;
 const AMI_RELEASES_URL = "https://github.com/millionco/ami-releases/releases";
+
+const colorizeByScore = (text: string, score: number): string => {
+  if (score >= SCORE_GOOD_THRESHOLD) return highlighter.success(text);
+  if (score >= SCORE_OK_THRESHOLD) return highlighter.warn(text);
+  return highlighter.error(text);
+};
+
 const DEEPLINK_FIX_PROMPT =
   "Run `npx -y react-doctor@latest .` to diagnose issues, then fix all reported issues one by one. After applying fixes, run it again to verify the results improved.";
 const CLIPBOARD_FIX_PROMPT =
@@ -242,12 +270,12 @@ const isAmiInstalled = (): boolean => {
 };
 
 const installAmi = (): void => {
-  logger.log("Ami not found. Installing...");
+  logger.log("Installing Ami...");
   logger.break();
   try {
     execSync(`curl -fsSL ${AMI_INSTALL_URL} | bash`, { stdio: "inherit" });
   } catch {
-    logger.error("Failed to install Ami. Visit https://ami.dev to install manually.");
+    logger.error(`Failed to install Ami. Visit ${AMI_WEBSITE_URL} to install manually.`);
     process.exit(1);
   }
   logger.break();
@@ -288,25 +316,25 @@ const openAmiToFix = (directory: string): void => {
   if (!isInstalled) {
     if (process.platform === "darwin") {
       installAmi();
-      logger.success("Ami was installed and opened.");
+      logger.success("Ami installed successfully.");
     } else {
       logger.error("Ami is not installed.");
-      logger.dim(`Download it at ${highlighter.info(AMI_RELEASES_URL)}`);
+      logger.dim(`Download at ${highlighter.info(AMI_RELEASES_URL)}`);
     }
     logger.break();
-    logger.dim("Once Ami is running, open this link to start fixing:");
+    logger.dim("Open this link to start fixing:");
     logger.info(webDeeplink);
     return;
   }
 
-  logger.log("Opening Ami to fix react-doctor issues...");
+  logger.log("Opening Ami...");
 
   try {
     openUrl(deeplink);
-    logger.success("Opened Ami with react-doctor fix prompt.");
+    logger.success("Ami opened. Fixing your issues now.");
   } catch {
     logger.break();
-    logger.dim("Could not open Ami automatically. Open this URL manually:");
+    logger.dim("Could not open Ami automatically. Open this link instead:");
     logger.info(webDeeplink);
   }
 };
@@ -340,30 +368,124 @@ const copyPromptToClipboard = (reactDoctorOutput: string, shouldLogResult: boole
   logger.info(promptWithOutput);
 };
 
-const maybePromptAmiFix = async (directory: string): Promise<void> => {
-  const isInstalled = isAmiInstalled();
+const FIX_METHOD_AMI = "ami";
+const FIX_METHOD_CLIPBOARD = "clipboard";
+const FIX_COMMAND_HINT = "npx react-doctor@latest --fix";
+
+const buildAmiBanner = (
+  issueCount: number,
+  currentScore: number,
+  estimatedScore: number,
+): string => {
+  const currentScoreDisplay = colorizeByScore(String(currentScore), currentScore);
+  const estimatedScoreDisplay = colorizeByScore(`~${estimatedScore}`, estimatedScore);
+  const issueLabel = issueCount === 1 ? "issue" : "issues";
+
+  return renderFramedBoxString([
+    createFramedLine(
+      `Score: ${currentScore} → ~${estimatedScore}`,
+      `Score: ${currentScoreDisplay} ${highlighter.dim("→")} ${estimatedScoreDisplay}`,
+    ),
+    createFramedLine(""),
+    createFramedLine(
+      `Ami is a coding agent built for React. It reads`,
+      `${highlighter.info("Ami")} is a coding agent built for React. It reads`,
+    ),
+    createFramedLine("your react-doctor report, understands your codebase,"),
+    createFramedLine(
+      `and fixes ${issueCount} ${issueLabel} one by one — then re-runs the`,
+      `and fixes ${highlighter.warn(String(issueCount))} ${issueLabel} one by one — then re-runs the`,
+    ),
+    createFramedLine("scan to verify the score improved."),
+    createFramedLine(""),
+    createFramedLine(
+      `Free to use. ${AMI_WEBSITE_URL}`,
+      `Free to use. ${highlighter.info(AMI_WEBSITE_URL)}`,
+    ),
+  ]);
+};
+
+const buildClipboardWarningBanner = (): string =>
+  renderFramedBoxString([
+    createFramedLine(
+      "⚠ Other agents may not fix these issues well.",
+      `${highlighter.warn("⚠")} Other agents may not fix these issues well.`,
+    ),
+    createFramedLine(""),
+    createFramedLine("react-doctor diagnostics require React-specific context"),
+    createFramedLine("that general-purpose agents often miss, leading to"),
+    createFramedLine("incomplete or incorrect fixes."),
+  ]);
+
+const buildSkipBanner = (issueCount: number, estimatedScore: number): string => {
+  const issueLabel = issueCount === 1 ? "issue" : "issues";
+  const estimatedScoreDisplay = colorizeByScore(`~${estimatedScore}`, estimatedScore);
+
+  return renderFramedBoxString([
+    createFramedLine(
+      `Skip fixing ${issueCount} ${issueLabel} and reaching ~${estimatedScore}?`,
+      `Skip fixing ${highlighter.warn(String(issueCount))} ${issueLabel} and reaching ${estimatedScoreDisplay}?`,
+    ),
+    createFramedLine(""),
+    createFramedLine(
+      `Run ${FIX_COMMAND_HINT} anytime to come back.`,
+      `Run ${highlighter.info(FIX_COMMAND_HINT)} anytime to come back.`,
+    ),
+  ]);
+};
+
+const configureFixBanners = (
+  issueCount: number,
+  estimatedScoreResult: EstimatedScoreResult,
+): void => {
+  const { currentScore, estimatedScore } = estimatedScoreResult;
+  setSelectBanner(buildAmiBanner(issueCount, currentScore, estimatedScore), 0);
+  setSelectBanner(buildClipboardWarningBanner(), 1);
+  setSelectBanner(buildSkipBanner(issueCount, estimatedScore), 2);
+};
+
+const maybePromptFix = async (
+  directory: string,
+  diagnostics: Diagnostic[],
+  estimatedScoreResult: EstimatedScoreResult | null,
+  capturedScanOutput: string,
+): Promise<void> => {
+  if (diagnostics.length === 0) return;
 
   logger.break();
-  logger.log(`Fix these issues with ${highlighter.info("Ami")}?`);
-  logger.dim("   Ami is a coding agent built to understand your codebase and fix issues");
-  logger.dim(`   automatically. Learn more at ${highlighter.info("https://ami.dev")}`);
-  logger.break();
 
-  if (!isInstalled && process.platform !== "darwin") {
-    logger.dim(`Download Ami at ${highlighter.info(AMI_RELEASES_URL)}`);
-    return;
+  if (estimatedScoreResult) {
+    configureFixBanners(diagnostics.length, estimatedScoreResult);
   }
 
-  const promptMessage = isInstalled ? "Open Ami to fix?" : "Install Ami to fix?";
-  const { shouldFix } = await prompts({
-    type: "confirm",
-    name: "shouldFix",
-    message: promptMessage,
-    initial: true,
+  const { fixMethod } = await prompts({
+    type: "select",
+    name: "fixMethod",
+    message: "Fix issues?",
+    choices: [
+      {
+        title: "Use ami.dev (recommended)",
+        description: "Optimized coding agent for React Doctor",
+        value: FIX_METHOD_AMI,
+      },
+      {
+        title: "Copy to clipboard",
+        description: "Other agents may lack context for react-doctor fixes",
+        value: FIX_METHOD_CLIPBOARD,
+      },
+      { title: "Skip", value: "skip" },
+    ],
   });
 
-  if (shouldFix) {
+  clearSelectBanner();
+
+  if (fixMethod === FIX_METHOD_AMI) {
     openAmiToFix(directory);
+  } else if (fixMethod === FIX_METHOD_CLIPBOARD) {
+    copyPromptToClipboard(capturedScanOutput, true);
+  } else {
+    logger.break();
+    logger.dim(`  Run ${highlighter.info(FIX_COMMAND_HINT)} anytime to fix issues.`);
   }
 };
 

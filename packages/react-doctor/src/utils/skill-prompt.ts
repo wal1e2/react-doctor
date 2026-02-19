@@ -58,7 +58,7 @@ export const maybePromptSkillInstall = async (shouldSkipPrompts: boolean): Promi
   const { shouldInstall } = await prompts({
     type: "confirm",
     name: "shouldInstall",
-    message: "Install skill?",
+    message: "Install skill? (recommended)",
     initial: true,
   });
 

@@ -22,6 +22,8 @@ export const SUMMARY_BOX_OUTER_INDENT_CHARS = 2;
 
 export const SCORE_API_URL = "https://www.react.doctor/api/score";
 
+export const ESTIMATE_SCORE_API_URL = "https://www.react.doctor/api/estimate-score";
+
 export const SHARE_BASE_URL = "https://www.react.doctor/share";
 
 export const OPEN_BASE_URL = "https://www.react.doctor/open";
